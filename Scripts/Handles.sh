@@ -46,36 +46,71 @@ FIX "natmapt" "$PACKAGE_PATH/luci-app-natmapt" sed -i "s/network/services/g" \
 	"$PACKAGE_PATH/luci-app-natmapt/root/usr/share/luci/menu.d/luci-app-natmap.json"
 
 
-# 修复luci-app-honk编译依赖：安装Zig
-FIX "honk-zig" "$PACKAGE_PATH/luci-app-honk/honk" bash -c '
-	set -e
 
-	HONK_DIR="./package/luci-app-honk/honk"
-	TOOLCHAIN="$HONK_DIR/honk_toolchain.sh"
+# 安装luci-app-honk编译工具链（Zig + bpf-linker）
+if [ -d "$PACKAGE_PATH/luci-app-honk/honk" ]; then
+	(
+		set -euo pipefail
 
-	[ -f "$TOOLCHAIN" ] || {
-		echo "honk_toolchain.sh not found!"
-		exit 1
-	}
+		HONK_DIR="$PACKAGE_PATH/luci-app-honk/honk"
+		TOOLCHAIN="$HONK_DIR/honk_toolchain.sh"
 
-	eval "$("$TOOLCHAIN")"
+		[ -f "$TOOLCHAIN" ] || {
+			echo "ERROR: honk_toolchain.sh not found!"
+			exit 1
+		}
 
-	command -v zig >/dev/null 2>&1 && {
-		echo "Zig already installed: $(zig version)"
-		exit 0
-	}
+		eval "$(bash "$TOOLCHAIN")"
 
-	echo "Installing Zig $ZIG_VERSION"
+		echo " "
+		echo "===== Honk Toolchain ====="
+		echo "Honk commit: $HONK_SRC_VERSION"
+		echo "Zig version: $ZIG_VERSION"
+		echo "bpf-linker version: $BPF_LINKER_VERSION"
 
-	curl -fsSL \
-		"https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" \
-		-o /tmp/honk-zig.tar.xz
+		# Install Zig
+		if [ "$(zig version 2>/dev/null || true)" != "$ZIG_VERSION" ]; then
+			echo "Installing Zig $ZIG_VERSION"
 
-	sudo mkdir -p /opt/honk-zig
-	sudo tar -xJf /tmp/honk-zig.tar.xz \
-		-C /opt/honk-zig --strip-components=1
+			curl -fsSL --retry 3 \
+				"https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" \
+				-o /tmp/honk-zig.tar.xz
 
-	sudo ln -sf /opt/honk-zig/zig /usr/local/bin/zig
+			ZIG_DIR="/opt/honk-zig-${ZIG_VERSION}"
 
-	zig version
-'
+			sudo rm -rf "$ZIG_DIR"
+			sudo mkdir -p "$ZIG_DIR"
+
+			sudo tar -xJf /tmp/honk-zig.tar.xz \
+				-C "$ZIG_DIR" --strip-components=1
+
+			sudo ln -sfn "$ZIG_DIR/zig" /usr/local/bin/zig
+		fi
+
+		# Install pinned bpf-linker
+		echo "Installing bpf-linker $BPF_LINKER_VERSION"
+
+		curl -fsSL --retry 3 \
+			"https://github.com/aya-rs/bpf-linker/releases/download/v${BPF_LINKER_VERSION}/bpf-linker-x86_64-unknown-linux-musl.tar.zst" \
+			-o /tmp/honk-bpf-linker.tar.zst
+
+		echo "${BPF_LINKER_SHA256}  /tmp/honk-bpf-linker.tar.zst" | sha256sum -c -
+
+		sudo tar --zstd -xf /tmp/honk-bpf-linker.tar.zst \
+			-C /usr/local/bin
+
+		sudo chmod +x /usr/local/bin/bpf-linker
+
+		# Verify toolchain
+		echo " "
+		echo "===== Verify Honk Toolchain ====="
+
+		zig version
+		command -v zig
+
+		bpf-linker --version
+		command -v bpf-linker
+
+		echo "Honk toolchain installed successfully!"
+	) || exit 1
+fi
