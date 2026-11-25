@@ -44,3 +44,38 @@ FIX "mini-diskmanager" "$PACKAGE_PATH/luci-app-mini-diskmanager" sed -i "s/servi
 #修改natmapt菜单位置
 FIX "natmapt" "$PACKAGE_PATH/luci-app-natmapt" sed -i "s/network/services/g" \
 	"$PACKAGE_PATH/luci-app-natmapt/root/usr/share/luci/menu.d/luci-app-natmap.json"
+
+
+# 修复luci-app-honk编译依赖：安装Zig
+FIX "honk-zig" "$PACKAGE_PATH/luci-app-honk/honk" bash -c '
+	set -e
+
+	HONK_DIR="./package/luci-app-honk/honk"
+	TOOLCHAIN="$HONK_DIR/honk_toolchain.sh"
+
+	[ -f "$TOOLCHAIN" ] || {
+		echo "honk_toolchain.sh not found!"
+		exit 1
+	}
+
+	eval "$("$TOOLCHAIN")"
+
+	command -v zig >/dev/null 2>&1 && {
+		echo "Zig already installed: $(zig version)"
+		exit 0
+	}
+
+	echo "Installing Zig $ZIG_VERSION"
+
+	curl -fsSL \
+		"https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" \
+		-o /tmp/honk-zig.tar.xz
+
+	sudo mkdir -p /opt/honk-zig
+	sudo tar -xJf /tmp/honk-zig.tar.xz \
+		-C /opt/honk-zig --strip-components=1
+
+	sudo ln -sf /opt/honk-zig/zig /usr/local/bin/zig
+
+	zig version
+'
