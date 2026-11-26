@@ -61,6 +61,15 @@ if [ -d "$PACKAGE_PATH/luci-app-honk/honk" ]; then
 		}
 
 		eval "$(bash "$TOOLCHAIN")"
+	cat >> .config <<'EOF'
+
+CONFIG_DEVEL=y
+CONFIG_KERNEL_DEBUG_INFO=y
+# CONFIG_KERNEL_DEBUG_INFO_REDUCED is not set
+CONFIG_KERNEL_DEBUG_INFO_BTF=y
+CONFIG_HONK_USE_KERNEL_BTF=y
+# CONFIG_HONK_USE_VMLINUX_BTF is not set
+EOF
 
 		echo " "
 		echo "===== Honk Toolchain ====="
