@@ -49,54 +49,73 @@ FIX "natmapt" "$PACKAGE_PATH/luci-app-natmapt" sed -i "s/network/services/g" \
 
 
 # 安装 luci-app-honk 完整编译工具链
+# 注意：不能写成 ( set -e; ... ) || exit 1，
+# 因为 || 左边的子 shell 内 set -e 会被 bash 忽略，任何失败都会被吞掉。
+# 这里用独立的 bash -e 进程执行，失败才会真正返回非零。
 if [ -d "$PACKAGE_PATH/luci-app-honk/honk" ]; then
-	(
-		set -e
+	HONK_DIR="$PACKAGE_PATH/luci-app-honk/honk" GITHUB_WORKSPACE="$GITHUB_WORKSPACE" bash -eo pipefail <<'HONK_TOOLCHAIN' || exit 1
+export PATH="$HOME/.cargo/bin:/usr/local/bin:$PATH"
 
-		HONK_DIR="$PACKAGE_PATH/luci-app-honk/honk"
+echo "===== Install Honk dependencies ====="
 
-		export PATH="$HOME/.cargo/bin:/usr/local/bin:$PATH"
+sudo apt-get update
+sudo apt-get install -y \
+	clang llvm libbpf-dev cmake libclang-dev zstd \
+	make perl file binutils git curl xz-utils pkg-config ca-certificates
 
-		echo "===== Install Honk dependencies ====="
+if [ ! -f "$HOME/.cargo/env" ]; then
+	curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --no-modify-path
+fi
+source "$HOME/.cargo/env"
 
-		sudo apt-get update
+echo "===== Resolve Honk toolchain pins ====="
 
-		sudo apt-get install -y \
-			clang llvm libbpf-dev cmake libclang-dev zstd \
-			make perl file binutils git curl xz-utils pkg-config ca-certificates
+# 先把输出存进变量：eval "$(cmd)" 会吞掉 cmd 的失败状态，导致变量为空还继续往下跑
+if ! HONK_ENV="$(bash "$HONK_DIR/honk_toolchain.sh" "$HONK_DIR/Makefile")"; then
+	echo "honk_toolchain.sh failed, fallback to manual parse"
 
-		if [ ! -f "$HOME/.cargo/env" ]; then
-			curl --proto '=https' --tlsv1.2 -sSf \
-				https://sh.rustup.rs | sh -s -- -y --profile minimal --no-modify-path
-		fi
+	URL=$(sed -n 's/^[[:space:]]*HONK_SRC_URL:=//p' "$HONK_DIR/Makefile" | head -n 1)
+	REV=$(sed -n 's/^[[:space:]]*HONK_SRC_VERSION:=//p' "$HONK_DIR/Makefile" | head -n 1)
+	REPO_PATH="${URL#https://github.com/}"
+	REPO_PATH="${REPO_PATH%.git}"
+	RAW="https://raw.githubusercontent.com/${REPO_PATH}/${REV}"
 
-		source "$HOME/.cargo/env"
+	curl -fsSL --retry 3 "$RAW/.github/ci/pins.env" -o /tmp/honk-pins.env
+	curl -fsSL --retry 3 "$RAW/.github/workflows/release.yml" -o /tmp/honk-release.yml
 
-		eval "$(bash "$HONK_DIR/honk_toolchain.sh" "$HONK_DIR/Makefile")"
+	echo "--- setup-zig context (debug) ---"
+	grep -n -A6 "setup-zig" /tmp/honk-release.yml || true
 
-		curl -fsSL --retry 3 \
-			-o /tmp/bpf-linker.tar.zst \
-			"https://github.com/aya-rs/bpf-linker/releases/download/v${BPF_LINKER_VERSION}/bpf-linker-x86_64-unknown-linux-musl.tar.zst"
+	ZV=$(grep -A8 "setup-zig" /tmp/honk-release.yml | sed -n 's/^[[:space:]]*version:[[:space:]]*//p' | head -n 1 | tr -d " \"'\r")
+	HONK_ENV="$(printf '%s\nZIG_VERSION=%s\n' \
+		"$(grep -E '^BPF_LINKER_(VERSION|SHA256)=' /tmp/honk-pins.env)" "$ZV")"
+fi
 
-		echo "${BPF_LINKER_SHA256}  /tmp/bpf-linker.tar.zst" | sha256sum -c -
+eval "$HONK_ENV"
 
-		sudo tar --zstd -xf /tmp/bpf-linker.tar.zst -C /usr/local/bin
+# 变量为空直接报错，避免拼出 404 的下载地址
+: "${BPF_LINKER_VERSION:?BPF_LINKER_VERSION is empty}"
+: "${BPF_LINKER_SHA256:?BPF_LINKER_SHA256 is empty}"
+: "${ZIG_VERSION:?ZIG_VERSION is empty}"
+echo "bpf-linker=$BPF_LINKER_VERSION zig=$ZIG_VERSION"
 
-		curl -fsSL --retry 3 \
-			-o /tmp/zig.tar.xz \
-			"https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
+curl -fsSL --retry 3 -o /tmp/bpf-linker.tar.zst \
+	"https://github.com/aya-rs/bpf-linker/releases/download/v${BPF_LINKER_VERSION}/bpf-linker-x86_64-unknown-linux-musl.tar.zst"
+echo "${BPF_LINKER_SHA256}  /tmp/bpf-linker.tar.zst" | sha256sum -c -
+sudo tar --zstd -xf /tmp/bpf-linker.tar.zst -C /usr/local/bin
 
-		sudo tar -xJf /tmp/zig.tar.xz -C /usr/local
+curl -fsSL --retry 3 -o /tmp/zig.tar.xz \
+	"https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
+sudo tar -xJf /tmp/zig.tar.xz -C /usr/local
+sudo ln -sf "/usr/local/zig-x86_64-linux-${ZIG_VERSION}/zig" /usr/local/bin/zig
 
-		sudo ln -sf \
-			"/usr/local/zig-x86_64-linux-${ZIG_VERSION}/zig" \
-			/usr/local/bin/zig
+echo "===== Verify Honk dependencies ====="
+zig version
+bpf-linker --version
+cargo --version
 
-		echo "===== Verify Honk dependencies ====="
-
-		zig version
-		bpf-linker --version
-		cargo --version
-
-	) || exit 1
+echo "===== Enable kernel BTF for honk ====="
+# 写入 PRIVATE.txt：Settings.sh 会在最后把它追加进 .config，
+# 保证覆盖 RTL9617C.txt 里的 "is not set" / REDUCED=y
+HONK_TOOLCHAIN
 fi
