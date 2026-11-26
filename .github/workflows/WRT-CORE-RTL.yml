@@ -196,12 +196,13 @@ jobs:
 
           make defconfig -j$(nproc) && make clean -j$(nproc)
 
-      - name: patch RTL9617c xtx补丁
+      - name: RTL9617c xtx补丁 和部分设置
         if: ${{ !inputs.WRT_TEST }}
         run: |
           cd ./wrt/
-
           cp -f "$GITHUB_WORKSPACE/files/310-mtd-xtx.patch" "target/linux/rtl9617c/patches-6.18/310-mtd-xtx.patch"
+          # 修改开机cpu默认频率1100
+          sed -i "s/uci -q set system.cpu.max_freq='1200000'/uci -q set system.cpu.max_freq='1100000'/" feeds/rtl9617c/luci-app-rtl9617c-pon/root/etc/uci-defaults/94-rtl9617c-cpu
 
       - name: Prepare Rust Toolchain
         if: ${{ !inputs.WRT_TEST }}
