@@ -51,52 +51,139 @@ FIX "natmapt" "$PACKAGE_PATH/luci-app-natmapt" sed -i "s/network/services/g" \
 # 安装 luci-app-honk 完整编译工具链
 if [ -d "$PACKAGE_PATH/luci-app-honk/honk" ]; then
 	(
-		set -e
+		set -euo pipefail
 
 		HONK_DIR="$PACKAGE_PATH/luci-app-honk/honk"
+		TOOLCHAIN="$HONK_DIR/honk_toolchain.sh"
 
-		export PATH="$HOME/.cargo/bin:/usr/local/bin:$PATH"
+		export PATH="$HOME/.cargo/bin:/usr/local/bin:$HOME/.local/bin:$PATH"
 
-		echo "===== Install Honk dependencies ====="
+		echo " "
+		echo "===== Install Honk Build Dependencies ====="
 
-		sudo apt-get update
+		[ -f "$TOOLCHAIN" ] || {
+			echo "ERROR: honk_toolchain.sh not found!"
+			exit 1
+		}
 
-		sudo apt-get install -y \
-			clang llvm libbpf-dev cmake libclang-dev zstd \
-			make perl file binutils git curl xz-utils pkg-config ca-certificates
+		# 读取 Honk 上游锁定的工具链版本
+		eval "$(bash "$TOOLCHAIN")"
 
-		if [ ! -f "$HOME/.cargo/env" ]; then
+		echo "Honk commit: $HONK_SRC_VERSION"
+		echo "Zig version: $ZIG_VERSION"
+		echo "bpf-linker version: $BPF_LINKER_VERSION"
+
+		# 安装系统编译依赖
+		sudo apt-get -o Acquire::Retries=5 update
+
+		sudo apt-get -o Acquire::Retries=5 install -y \
+			clang \
+			llvm \
+			libbpf-dev \
+			pkg-config \
+			cmake \
+			libclang-dev \
+			zstd
+
+		# 安装 Rustup
+		if ! command -v rustup >/dev/null 2>&1; then
 			curl --proto '=https' --tlsv1.2 -sSf \
-				https://sh.rustup.rs | sh -s -- -y --profile minimal --no-modify-path
+				https://sh.rustup.rs | sh -s -- -y --profile minimal
 		fi
+
+		[ -f "$HOME/.cargo/env" ] || {
+			echo "ERROR: Rust environment not found!"
+			exit 1
+		}
 
 		source "$HOME/.cargo/env"
 
-		eval "$(bash "$HONK_DIR/honk_toolchain.sh" "$HONK_DIR/Makefile")"
+		export PATH="$HOME/.cargo/bin:/usr/local/bin:$PATH"
 
-		curl -fsSL --retry 3 \
-			-o /tmp/bpf-linker.tar.zst \
-			"https://github.com/aya-rs/bpf-linker/releases/download/v${BPF_LINKER_VERSION}/bpf-linker-x86_64-unknown-linux-musl.tar.zst"
+		# 从 Honk 精确提交读取 Rust stable / nightly 版本
+		HONK_REPO="${HONK_SRC_URL#https://github.com/}"
+		HONK_REPO="${HONK_REPO%.git}"
+		HONK_RAW="https://raw.githubusercontent.com/${HONK_REPO}/${HONK_SRC_VERSION}"
 
-		echo "${BPF_LINKER_SHA256}  /tmp/bpf-linker.tar.zst" | sha256sum -c -
+		RUST_STABLE=$(curl -fsSL --retry 5 \
+			"$HONK_RAW/rust-toolchain.toml" |
+			sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' |
+			head -n 1)
 
-		sudo tar --zstd -xf /tmp/bpf-linker.tar.zst -C /usr/local/bin
+		RUST_EBPF=$(curl -fsSL --retry 5 \
+			"$HONK_RAW/crates/honk-ebpf/rust-toolchain.toml" |
+			sed -n 's/^[[:space:]]*channel[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' |
+			head -n 1)
 
-		curl -fsSL --retry 3 \
-			-o /tmp/zig.tar.xz \
-			"https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
+		[ -n "$RUST_STABLE" ] && [ -n "$RUST_EBPF" ] || {
+			echo "ERROR: Cannot resolve Honk Rust toolchain!"
+			exit 1
+		}
 
-		sudo tar -xJf /tmp/zig.tar.xz -C /usr/local
+		echo "Rust stable: $RUST_STABLE"
+		echo "Rust eBPF: $RUST_EBPF"
 
-		sudo ln -sf \
-			"/usr/local/zig-x86_64-linux-${ZIG_VERSION}/zig" \
-			/usr/local/bin/zig
+		# 安装 Rust stable
+		rustup toolchain install "$RUST_STABLE" --profile minimal
 
-		echo "===== Verify Honk dependencies ====="
+		# 安装 eBPF nightly
+		rustup toolchain install "$RUST_EBPF" \
+			--profile minimal \
+			--component rust-src \
+			--component llvm-tools
+
+		# 安装 Zig
+		if [ "$(zig version 2>/dev/null || true)" != "$ZIG_VERSION" ]; then
+			echo "Installing Zig $ZIG_VERSION"
+
+			curl -fsSL --retry 5 \
+				"https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" \
+				-o /tmp/honk-zig.tar.xz
+
+			ZIG_DIR="/opt/honk-zig-${ZIG_VERSION}"
+
+			sudo rm -rf "$ZIG_DIR"
+			sudo mkdir -p "$ZIG_DIR"
+
+			sudo tar -xJf /tmp/honk-zig.tar.xz \
+				-C "$ZIG_DIR" --strip-components=1
+
+			sudo ln -sfn "$ZIG_DIR/zig" /usr/local/bin/zig
+		fi
+
+		# 安装 bpf-linker
+		echo "Installing bpf-linker $BPF_LINKER_VERSION"
+
+		curl -fsSL --retry 5 \
+			"https://github.com/aya-rs/bpf-linker/releases/download/v${BPF_LINKER_VERSION}/bpf-linker-x86_64-unknown-linux-musl.tar.zst" \
+			-o /tmp/honk-bpf-linker.tar.zst
+
+		echo "${BPF_LINKER_SHA256}  /tmp/honk-bpf-linker.tar.zst" |
+			sha256sum -c -
+
+		sudo tar --zstd -xf /tmp/honk-bpf-linker.tar.zst \
+			-C /usr/local/bin
+
+		sudo chmod +x /usr/local/bin/bpf-linker
+
+		# 验证工具链
+		echo " "
+		echo "===== Verify Honk Toolchain ====="
 
 		zig version
 		bpf-linker --version
+		rustc "+${RUST_STABLE}" --version
+		rustc "+${RUST_EBPF}" --version
 		cargo --version
 
+		command -v zig
+		command -v bpf-linker
+		command -v cargo
+
+		echo " "
+		echo "Honk build dependencies installed successfully!"
+
 	) || exit 1
+else
+	echo "Honk package not found, skipping toolchain installation."
 fi
