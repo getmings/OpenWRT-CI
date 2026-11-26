@@ -188,13 +188,20 @@ jobs:
             cat $GITHUB_WORKSPACE/Config/$WRT_CONFIG.txt >> .config
           else
             # cat $GITHUB_WORKSPACE/Config/$WRT_CONFIG.txt $GITHUB_WORKSPACE/Config/GENERAL.txt >> .config
-            cat $GITHUB_WORKSPACE/Config/$WRT_CONFIG.txt >> .config
+            cat $GITHUB_WORKSPACE/Config/$WRT_CONFIG.txt $GITHUB_WORKSPACE/Config/RTL9617C-app.txt >> .config
           fi
 
           $GITHUB_WORKSPACE/Scripts/Settings.sh
           $GITHUB_WORKSPACE/.github/scripts/prepare-build-host.sh
 
           make defconfig -j$(nproc) && make clean -j$(nproc)
+
+      - name: patch RTL9617c xtx补丁
+        if: ${{ !inputs.WRT_TEST }}
+        run: |
+          cd ./wrt/
+
+          cp -f "$GITHUB_WORKSPACE/files/310-mtd-xtx.patch" "target/linux/rtl9617c/patches-6.18/310-mtd-xtx.patch"
 
       - name: Prepare Rust Toolchain
         if: ${{ !inputs.WRT_TEST }}
