@@ -2,16 +2,6 @@
 #CONFIG_PACKAGE_luci-app-homeproxy=y
 # -------luci-app-honk--------#
 CONFIG_PACKAGE_luci-app-honk=y
-CONFIG_KERNEL_DEBUG_INFO=y
-# CONFIG_KERNEL_DEBUG_INFO_REDUCED is not set
-CONFIG_KERNEL_DEBUG_INFO_BTF=y
-CONFIG_KERNEL_BPF_EVENTS=y
-CONFIG_KERNEL_CGROUPS=y
-CONFIG_KERNEL_CGROUP_BPF=y
-CONFIG_PACKAGE_kmod-sched-core=y
-CONFIG_PACKAGE_kmod-sched-bpf=y
-CONFIG_PACKAGE_kmod-veth=y
-CONFIG_HONK_USE_KERNEL_BTF=y
 # -------END--------#
 
 #增加插件
