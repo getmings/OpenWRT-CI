@@ -51,7 +51,7 @@ FIX "natmapt" "$PACKAGE_PATH/luci-app-natmapt" sed -i "s/network/services/g" \
 # 安装 luci-app-honk 完整编译工具链
 if [ -d "$PACKAGE_PATH/luci-app-honk/honk" ]; then
 	(
-		set -e
+		set -eo pipefail
 
 		HONK_DIR="$PACKAGE_PATH/luci-app-honk/honk"
 
@@ -72,7 +72,16 @@ if [ -d "$PACKAGE_PATH/luci-app-honk/honk" ]; then
 
 		source "$HOME/.cargo/env"
 
-		eval "$(bash "$HONK_DIR/honk_toolchain.sh" "$HONK_DIR/Makefile")"
+		echo "===== Resolve Honk toolchain pins ====="
+
+		# 先存进变量再 eval：eval "$(cmd)" 会吞掉 cmd 的失败状态
+		HONK_ENV="$(bash "$HONK_DIR/honk_toolchain.sh" "$HONK_DIR/Makefile")"
+		eval "$HONK_ENV"
+
+		: "${BPF_LINKER_VERSION:?BPF_LINKER_VERSION is empty}"
+		: "${BPF_LINKER_SHA256:?BPF_LINKER_SHA256 is empty}"
+
+		echo "===== Install bpf-linker ====="
 
 		curl -fsSL --retry 3 \
 			-o /tmp/bpf-linker.tar.zst \
@@ -82,21 +91,71 @@ if [ -d "$PACKAGE_PATH/luci-app-honk/honk" ]; then
 
 		sudo tar --zstd -xf /tmp/bpf-linker.tar.zst -C /usr/local/bin
 
+		echo "===== Install latest stable zig ====="
+
+		# 从官方 index.json 取最新正式版（忽略 master），并校验 sha256
+		curl -fsSL --retry 3 \
+			-o /tmp/zig-index.json \
+			https://ziglang.org/download/index.json
+
+		python3 -c '
+import json, re
+d = json.load(open("/tmp/zig-index.json"))
+vers = [k for k in d if re.fullmatch(r"\d+\.\d+\.\d+", k)]
+v = max(vers, key=lambda x: tuple(map(int, x.split("."))))
+t = d[v]["x86_64-linux"]
+print("ZIG_REAL_VERSION=" + v)
+print("ZIG_TARBALL=" + t["tarball"])
+print("ZIG_SHASUM=" + t["shasum"])
+' > /tmp/zig-info.env
+
+		eval "$(cat /tmp/zig-info.env)"
+
+		: "${ZIG_TARBALL:?zig tarball url is empty}"
+		echo "zig=$ZIG_REAL_VERSION"
+
 		curl -fsSL --retry 3 \
 			-o /tmp/zig.tar.xz \
-			"https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz"
+			"$ZIG_TARBALL"
+
+		echo "${ZIG_SHASUM}  /tmp/zig.tar.xz" | sha256sum -c -
 
 		sudo tar -xJf /tmp/zig.tar.xz -C /usr/local
 
 		sudo ln -sf \
-			"/usr/local/zig-x86_64-linux-${ZIG_VERSION}/zig" \
+			"/usr/local/$(basename "$ZIG_TARBALL" .tar.xz)/zig" \
 			/usr/local/bin/zig
+
+		echo "===== Install cargo-zigbuild ====="
+
+		cargo install --locked cargo-zigbuild
 
 		echo "===== Verify Honk dependencies ====="
 
 		zig version
 		bpf-linker --version
 		cargo --version
+		cargo zigbuild --help > /dev/null
 
-	) || exit 1
+		echo "===== Enable kernel BTF for honk ====="
+
+		# 写入 PRIVATE.txt：Settings.sh 会在最后把它追加进 .config，
+		# 保证覆盖 RTL9617C.txt 里的 "is not set" / REDUCED=y
+		printf '%s\n' \
+			"" \
+			"# honk: 使用内核自带 BTF（否则回退到不存在的 vmlinux-btf 包）" \
+			"CONFIG_KERNEL_DEBUG_INFO=y" \
+			"# CONFIG_KERNEL_DEBUG_INFO_REDUCED is not set" \
+			"CONFIG_KERNEL_DEBUG_INFO_BTF=y" \
+			"CONFIG_KERNEL_BPF_EVENTS=y" \
+			"CONFIG_KERNEL_CGROUPS=y" \
+			"CONFIG_KERNEL_CGROUP_BPF=y" \
+			"CONFIG_PACKAGE_kmod-sched-core=y" \
+			"CONFIG_PACKAGE_kmod-sched-bpf=y" \
+			"CONFIG_PACKAGE_kmod-veth=y" \
+			"CONFIG_HONK_USE_KERNEL_BTF=y" \
+			>> "$GITHUB_WORKSPACE/Config/PRIVATE.txt"
+	)
+	# 不能写成 ( ... ) || exit 1：|| 会让子 shell 里的 set -e 失效，失败被吞掉
+	[ $? -eq 0 ] || exit 1
 fi
