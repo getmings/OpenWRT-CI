@@ -37,13 +37,6 @@ if [ -f "$GITHUB_WORKSPACE/Config/PRIVATE.txt" ]; then
 	cat $GITHUB_WORKSPACE/Config/PRIVATE.txt >> ./.config
 fi
 
-#检查并清理 .config 中 make 无法解析的行（合法行：CONFIG_X=值、# 注释、空行）
-echo "===== .config sanity check ====="
-wc -l ./.config
-grep -nvE '^(CONFIG_[A-Za-z0-9_+-]+=.*|#.*|)$' ./.config | head -50 || true
-sed -n '8066,8078p' ./.config || true
-sed -i -E '/^(CONFIG_[A-Za-z0-9_+-]+=.*|#.*|)$/!d' ./.config
-
 #手动调整的插件
 if [ -n "$WRT_PACKAGE" ]; then
 	echo -e "$WRT_PACKAGE" >> ./.config
