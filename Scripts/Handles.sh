@@ -49,11 +49,11 @@ FIX "natmapt" "$PACKAGE_PATH/luci-app-natmapt" sed -i "s/network/services/g" \
 
 
 # 安装 luci-app-honk 完整编译工具链
-if [ -d "$PACKAGE_PATH/luci-app-honk/honk" ]; then
+if [ -d "$PACKAGE_PATH/luci-app-daeuniverse/honk" ]; then
 	(
 		set -eo pipefail
 
-		HONK_DIR="$PACKAGE_PATH/luci-app-honk/honk"
+		HONK_DIR="$PACKAGE_PATH/luci-app-daeuniverse/honk"
 
 		export PATH="$HOME/.cargo/bin:/usr/local/bin:$PATH"
 
