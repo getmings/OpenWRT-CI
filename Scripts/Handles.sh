@@ -138,29 +138,6 @@ print("ZIG_SHASUM=" + t["shasum"])
 		cargo zigbuild --help > /dev/null
 
 		echo "===== Enable kernel BTF for honk ====="
-
-		# 写入 PRIVATE.txt：Settings.sh 会在最后把它追加进 .config，
-		# 保证覆盖 RTL9617C.txt 里的 "is not set" / REDUCED=y
-		cat >> "$GITHUB_WORKSPACE/Config/PRIVATE.txt" <<'EOF'
-
-# honk: 使用内核自带 BTF（否则回退到不存在的 vmlinux-btf 包）
-CONFIG_KERNEL_DEBUG_INFO=y
-# CONFIG_KERNEL_DEBUG_INFO_REDUCED is not set
-CONFIG_KERNEL_DEBUG_INFO_BTF=y
-CONFIG_KERNEL_BPF_EVENTS=y
-CONFIG_KERNEL_CGROUPS=y
-CONFIG_KERNEL_CGROUP_BPF=y
-CONFIG_PACKAGE_kmod-sched-core=y
-CONFIG_PACKAGE_kmod-sched-bpf=y
-CONFIG_PACKAGE_kmod-veth=y
-CONFIG_HONK_USE_KERNEL_BTF=y
-EOF
-
-		#调试：打印 PRIVATE.txt 实际内容，并列出其中不合法的行（合法行：CONFIG_ 开头、# 注释、空行）
-		echo "----- PRIVATE.txt -----"
-		cat "$GITHUB_WORKSPACE/Config/PRIVATE.txt"
-		echo "----- invalid lines (should be empty) -----"
-		grep -nvE '^(CONFIG_[A-Za-z0-9_+-]+=.*|#.*|)$' "$GITHUB_WORKSPACE/Config/PRIVATE.txt" || true
 	)
 	# 不能写成 ( ... ) || exit 1：|| 会让子 shell 里的 set -e 失效，失败被吞掉
 	[ $? -eq 0 ] || exit 1
