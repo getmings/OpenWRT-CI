@@ -155,6 +155,12 @@ print("ZIG_SHASUM=" + t["shasum"])
 			"CONFIG_PACKAGE_kmod-veth=y" \
 			"CONFIG_HONK_USE_KERNEL_BTF=y" \
 			>> "$GITHUB_WORKSPACE/Config/PRIVATE.txt"
+
+		#调试：打印 PRIVATE.txt 实际内容，并列出其中不合法的行（合法行：CONFIG_ 开头、# 注释、空行）
+		echo "----- PRIVATE.txt -----"
+		cat -A "$GITHUB_WORKSPACE/Config/PRIVATE.txt"
+		echo "----- invalid lines (should be empty) -----"
+		grep -nvE '^(CONFIG_[A-Za-z0-9_+-]+=.*|#.*|)$' "$GITHUB_WORKSPACE/Config/PRIVATE.txt" || true
 	)
 	# 不能写成 ( ... ) || exit 1：|| 会让子 shell 里的 set -e 失效，失败被吞掉
 	[ $? -eq 0 ] || exit 1
