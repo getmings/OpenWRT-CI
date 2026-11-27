@@ -71,7 +71,7 @@ jobs:
       - name: Checkout Projects
         uses: actions/checkout@main
 
-      - name: Initialization Environment
+      - name: 初始化环境
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
@@ -97,7 +97,7 @@ jobs:
           sudo chown $USER:$USER /mnt/build_wrt
           sudo ln -s /mnt/build_wrt $GITHUB_WORKSPACE/wrt
 
-      - name: Initialization Values
+      - name: 初始化值
         id: initialize-values
         run: |
           WRT_TARGET=$(grep -m 1 -oP '^CONFIG_TARGET_\K[^=_]+(?=\=y)' "./Config/$WRT_CONFIG.txt")
@@ -122,7 +122,7 @@ jobs:
           } >> "$GITHUB_ENV"
           echo "cache_prefix=$WRT_CACHE_PREFIX" >> "$GITHUB_OUTPUT"
 
-      - name: Clone Code
+      - name: 克隆代码
         id: clone-code
         run: |
           git clone --depth=1 --single-branch --branch $WRT_BRANCH $WRT_REPO ./wrt/
@@ -139,7 +139,7 @@ jobs:
             sed -i '/.cn\//d; /tencent/d; /aliyun/d' "$PROJECT_MIRRORS_FILE"
           fi
 
-      - name: Check Scripts
+      - name: 检查脚本
         run: |
           find ./ -maxdepth 3 -type f -iregex ".*\(txt\|sh\)$" -exec dos2unix {} \; -exec chmod +x {} \;
 
@@ -155,7 +155,7 @@ jobs:
             ./wrt/staging_dir/host*
             ./wrt/staging_dir/tool*
 
-      - name: Prepare Restored Build Cache
+      - name: 准备还原的构建缓存
         if: ${{ !inputs.WRT_TEST && steps.cache-restore.outputs.cache-matched-key != '' }}
         run: |
           find "./wrt/staging_dir" -type d -name "stamp" -not -path "*target*" | while read -r DIR; do
@@ -165,14 +165,14 @@ jobs:
           echo "1" > ./wrt/tmp/.build
           echo "restored build cache: ${{steps.cache-restore.outputs.cache-matched-key}}"
 
-      - name: Update Feeds
+      - name: 更新 Feeds
         run: |
           cd ./wrt/
 
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
-      - name: Custom Packages
+      - name: 自定义软件包
         run: |
           cd ./wrt/
 
@@ -180,7 +180,7 @@ jobs:
           $GITHUB_WORKSPACE/Scripts/Handles.sh
           $GITHUB_WORKSPACE/.github/scripts/prepare-i2c-tools.sh
 
-      - name: Custom Settings
+      - name: 自定义设置
         run: |
           cd ./wrt/
 
@@ -204,21 +204,21 @@ jobs:
           # 修改开机cpu默认频率1100
           sed -i "s/uci -q set system.cpu.max_freq='1200000'/uci -q set system.cpu.max_freq='1100000'/" feeds/rtl9617c/luci-app-rtl9617c-pon/root/etc/uci-defaults/94-rtl9617c-cpu
 
-      - name: Prepare Rust Toolchain
+      - name: 准备 Rust 工具链
         if: ${{ !inputs.WRT_TEST }}
         run: |
           cd ./wrt/
 
           $GITHUB_WORKSPACE/.github/scripts/prepare-rust.sh
 
-      - name: Download Packages
+      - name: 下载 Packages
         if: ${{ !inputs.WRT_TEST }}
         run: |
           cd ./wrt/
 
           make download -j$(nproc)
 
-      - name: Compile Firmware
+      - name: 编译固件
         if: ${{ !inputs.WRT_TEST }}
         run: |
           cd ./wrt/
@@ -227,7 +227,7 @@ jobs:
           make -j$(nproc) BUILD_TIME_LOG="$GITHUB_WORKSPACE/build-reports/parallel.tsv" || \
             make -j1 V=s BUILD_TIME_LOG="$GITHUB_WORKSPACE/build-reports/serial.tsv"
 
-      - name: Collect Build Reports
+      - name: 收集构建报告
         if: ${{ !inputs.WRT_TEST && always() }}
         continue-on-error: true
         run: |
@@ -235,7 +235,7 @@ jobs:
 
           $GITHUB_WORKSPACE/.github/scripts/collect-build-reports.sh
 
-      - name: Upload Build Reports
+      - name: 上传构建报告
         if: ${{ !inputs.WRT_TEST && always() }}
         continue-on-error: true
         uses: actions/upload-artifact@v7
@@ -244,7 +244,7 @@ jobs:
           path: ./build-reports/
           retention-days: 7
 
-      - name: Save Build Cache
+      - name: 保存构建缓存
         if: ${{ !inputs.WRT_TEST && success() && steps.cache-restore.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@main
         with:
@@ -254,7 +254,7 @@ jobs:
             ./wrt/staging_dir/host*
             ./wrt/staging_dir/tool*
 
-      - name: Machine Information
+      - name: 机器信息
         run: |
           cd ./wrt/
 
@@ -266,7 +266,7 @@ jobs:
           du -h --max-depth=1
           echo "======================="
 
-      - name: Package Firmware
+      - name: 封装固件
         run: |
           cd ./wrt/ && mkdir ./upload/
 
@@ -290,7 +290,7 @@ jobs:
             make clean -j$(nproc)
           fi
 
-      - name: Release Firmware
+      - name: 发布固件
         uses: softprops/action-gh-release@master
         with:
           tag_name: ${{env.WRT_CONFIG}}-${{env.WRT_INFO}}-${{env.WRT_BRANCH}}-${{env.WRT_DATE}}
